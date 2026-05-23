@@ -1,0 +1,13 @@
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# env
+.env
+.env.*
+
+# logs
+*.log
+
+# system
+.DS_Store

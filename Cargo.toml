@@ -1,0 +1,23 @@
+[package]
+name = "daman-bridge"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Daman bridge forager bee: translates Arc chain events to hum mesh tones, dispatches slash-claim and ruling tones back on chain."
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "net"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+parking_lot = "0.12"
+hex = "0.4"
+libc = "0.2"
+sha3 = "0.10"
+
+[[bin]]
+name = "daman-bridge"
+path = "src/main.rs"
