@@ -111,8 +111,8 @@ struct RpcLog {
 /// Outbound chain calls the bridge issues on behalf of mesh tones.
 #[derive(Debug, Clone)]
 enum DispatchIntent {
-    AttestDegradation { leader: String, evidence_hash: String },
-    ArbiterRule { claim_id: String, slash_amount: String, upheld: bool },
+    AttestDegradation { leader: String, evidence_hash: String, builder: String },
+    ArbiterRule { claim_id: String, slash_amount: String, upheld: bool, builder: String },
 }
 
 #[tokio::main]
@@ -264,11 +264,21 @@ fn parse_inbound_dispatch(line: &str) -> Option<DispatchIntent> {
         "slash-claim" => Some(DispatchIntent::AttestDegradation {
             leader: args.get("leader")?.as_str()?.to_string(),
             evidence_hash: args.get("evidenceHash")?.as_str()?.to_string(),
+            builder: args
+                .get("builder")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(zero_bytes32),
         }),
         "ruling" => Some(DispatchIntent::ArbiterRule {
             claim_id: args.get("claimId")?.as_str()?.to_string(),
             slash_amount: args.get("slashAmount")?.as_str()?.to_string(),
             upheld: args.get("upheld")?.as_bool()?,
+            builder: args
+                .get("builder")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(zero_bytes32),
         }),
         _ => None,
     }
@@ -280,16 +290,17 @@ async fn dispatch_to_chain(
     intent: &DispatchIntent,
 ) -> Result<()> {
     let calldata = match intent {
-        DispatchIntent::AttestDegradation { leader, evidence_hash } => {
-            // attestDegradation(address,bytes32)
-            let selector = keccak_selector("attestDegradation(address,bytes32)");
+        DispatchIntent::AttestDegradation { leader, evidence_hash, builder } => {
+            // attestDegradation(address,bytes32,bytes32)
+            let selector = keccak_selector("attestDegradation(address,bytes32,bytes32)");
             let leader_word = pad_left_address(leader);
-            let evidence_word = strip_hex(evidence_hash);
-            format!("0x{}{}{}", selector, leader_word, evidence_word)
+            let evidence_word = pad_left_word(strip_hex(evidence_hash));
+            let builder_word = pad_left_word(strip_hex(builder));
+            format!("0x{}{}{}{}", selector, leader_word, evidence_word, builder_word)
         }
-        DispatchIntent::ArbiterRule { claim_id, slash_amount, upheld } => {
-            // arbiterRule(uint256,uint256,bool)
-            let selector = keccak_selector("arbiterRule(uint256,uint256,bool)");
+        DispatchIntent::ArbiterRule { claim_id, slash_amount, upheld, builder } => {
+            // arbiterRule(uint256,uint256,bool,bytes32)
+            let selector = keccak_selector("arbiterRule(uint256,uint256,bool,bytes32)");
             let claim_word = pad_left_word(strip_hex(claim_id));
             let amount_word = pad_left_word(strip_hex(slash_amount));
             let upheld_word = if *upheld {
@@ -297,7 +308,8 @@ async fn dispatch_to_chain(
             } else {
                 "0".repeat(64)
             };
-            format!("0x{}{}{}{}", selector, claim_word, amount_word, upheld_word)
+            let builder_word = pad_left_word(strip_hex(builder));
+            format!("0x{}{}{}{}{}", selector, claim_word, amount_word, upheld_word, builder_word)
         }
     };
 
@@ -383,12 +395,12 @@ struct TopicTable {
 fn topic_table() -> TopicTable {
     let pairs: &[(&str, &str)] = &[
         ("leader-bond-posted", "LeaderBondPosted(address,uint256,uint256)"),
-        ("follower-subscribed", "FollowerSubscribed(address,address,uint256)"),
+        ("follower-subscribed", "FollowerSubscribed(address,address,uint256,bytes32)"),
         ("trade-executed", "TradeExecuted(address,address,uint256,bool,uint64)"),
         ("settlement-completed", "SettlementCompleted(address,uint256,int256,uint64)"),
-        ("degradation-detected", "DegradationFlagged(uint256,address,address,bytes32)"),
+        ("degradation-detected", "DegradationFlagged(uint256,address,address,bytes32,bytes32)"),
         ("dispute-opened", "DisputeOpened(uint256,address)"),
-        ("ruling", "ArbiterRuled(uint256,uint256,bool)"),
+        ("ruling", "ArbiterRuled(uint256,uint256,bool,bytes32)"),
         ("bond-slashed", "BondSlashed(address,uint256,uint256)"),
     ];
     let mut by_hash = HashMap::new();
@@ -446,6 +458,10 @@ fn strip_hex(s: &str) -> String {
     s.trim_start_matches("0x").to_string()
 }
 
+fn zero_bytes32() -> String {
+    format!("0x{}", "0".repeat(64))
+}
+
 fn parse_hex_u64(s: &str) -> Result<u64> {
     let stripped = s.trim_start_matches("0x");
     u64::from_str_radix(stripped, 16).context("parse u64 from hex")
@@ -478,12 +494,13 @@ mod tests {
 
     #[test]
     fn parse_inbound_dispatch_handles_slash_claim() {
-        let raw = r#"{"chi":"slash-claim","args":{"leader":"0xabc","evidenceHash":"0xdef"}}"#;
+        let raw = r#"{"chi":"slash-claim","args":{"leader":"0xabc","evidenceHash":"0xdef","builder":"0xf00d"}}"#;
         let intent = parse_inbound_dispatch(raw).unwrap();
         match intent {
-            DispatchIntent::AttestDegradation { leader, evidence_hash } => {
+            DispatchIntent::AttestDegradation { leader, evidence_hash, builder } => {
                 assert_eq!(leader, "0xabc");
                 assert_eq!(evidence_hash, "0xdef");
+                assert_eq!(builder, "0xf00d");
             }
             _ => panic!("expected AttestDegradation"),
         }
