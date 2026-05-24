@@ -112,7 +112,13 @@ struct RpcLog {
 #[derive(Debug, Clone)]
 enum DispatchIntent {
     AttestDegradation { leader: String, evidence_hash: String, builder: String },
-    ArbiterRule { claim_id: String, slash_amount: String, upheld: bool, builder: String },
+    ArbiterRule {
+        claim_id: String,
+        slash_amount: String,
+        upheld: bool,
+        builder: String,
+        trace_cid: String,
+    },
 }
 
 #[tokio::main]
@@ -279,6 +285,11 @@ fn parse_inbound_dispatch(line: &str) -> Option<DispatchIntent> {
                 .and_then(Value::as_str)
                 .map(String::from)
                 .unwrap_or_else(zero_bytes32),
+            trace_cid: args
+                .get("traceCid")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .unwrap_or_else(zero_bytes32),
         }),
         _ => None,
     }
@@ -298,9 +309,9 @@ async fn dispatch_to_chain(
             let builder_word = pad_left_word(strip_hex(builder));
             format!("0x{}{}{}{}", selector, leader_word, evidence_word, builder_word)
         }
-        DispatchIntent::ArbiterRule { claim_id, slash_amount, upheld, builder } => {
-            // arbiterRule(uint256,uint256,bool,bytes32)
-            let selector = keccak_selector("arbiterRule(uint256,uint256,bool,bytes32)");
+        DispatchIntent::ArbiterRule { claim_id, slash_amount, upheld, builder, trace_cid } => {
+            // arbiterRule(uint256,uint256,bool,bytes32,bytes32)
+            let selector = keccak_selector("arbiterRule(uint256,uint256,bool,bytes32,bytes32)");
             let claim_word = pad_left_word(strip_hex(claim_id));
             let amount_word = pad_left_word(strip_hex(slash_amount));
             let upheld_word = if *upheld {
@@ -309,7 +320,11 @@ async fn dispatch_to_chain(
                 "0".repeat(64)
             };
             let builder_word = pad_left_word(strip_hex(builder));
-            format!("0x{}{}{}{}{}", selector, claim_word, amount_word, upheld_word, builder_word)
+            let trace_word = pad_left_word(strip_hex(trace_cid));
+            format!(
+                "0x{}{}{}{}{}{}",
+                selector, claim_word, amount_word, upheld_word, builder_word, trace_word
+            )
         }
     };
 
@@ -400,7 +415,7 @@ fn topic_table() -> TopicTable {
         ("settlement-completed", "SettlementCompleted(address,uint256,int256,uint64)"),
         ("degradation-detected", "DegradationFlagged(uint256,address,address,bytes32,bytes32)"),
         ("dispute-opened", "DisputeOpened(uint256,address)"),
-        ("ruling", "ArbiterRuled(uint256,uint256,bool,bytes32)"),
+        ("ruling", "ArbiterRuled(uint256,uint256,bool,bytes32,bytes32)"),
         ("bond-slashed", "BondSlashed(address,uint256,uint256)"),
     ];
     let mut by_hash = HashMap::new();
